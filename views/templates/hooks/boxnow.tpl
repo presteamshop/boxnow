@@ -56,31 +56,8 @@
 	<input type="hidden" class="boxnow-zip" value="{$boxnow_selected_entry->locker_post_code|escape:'htmlall':'UTF-8'}">
 
 	<script type="text/javascript">
-		window.addEventListener("load", function() {
-			jQuery('#js-delivery .continue').off('click.boxnow').on('click.boxnow', function() {
-				if ($('.boxnow-zip').val() === '' && $('#boxnow-map-container').is(":visible")) {
-					$('.boxnow-selected-locker').html('<div class="select-boxnow-locker error">{$select_boxnow_locker_error}</div>');
-					const offset = 100;
-					const target = $('.boxnow-selected-locker');
-					$('html, body').stop().animate({
-						'scrollTop': $(target).offset().top - offset
-					}, 700, 'swing');
-					return false;
-				}
-			});
-
-			if (typeof _bn_map_widget_config === 'undefined') return;
-
-			(function(d) {
-				const e = d.createElement("script");
-				e.src = "https://widget-cdn.boxnow.gr/map-widget/client/v5.js";
-				e.async = true;
-				e.defer = true;
-				d.getElementsByTagName("head")[0].appendChild(e);
-			})(document);
-		});
-
-		var _bn_map_widget_config = {
+		// CRITICAL: Define config FIRST before any initialization calls
+		window._bn_map_widget_config = {
 			type: "{$boxnow_map_mode|escape:'htmlall':'UTF-8'}",
 			gps: true,
 			partnerId: {$boxnow_partner_id},
@@ -123,6 +100,123 @@
 				}
 			}
 		};
+
+		// Also keep the local variable for backward compatibility
+		var _bn_map_widget_config = window._bn_map_widget_config;
+
+		// BOXNOW widget initialization function (defined globally to prevent redefinition)
+		if (typeof window.initBoxNowWidget === 'undefined') {
+			// Debounce timer to prevent multiple simultaneous initializations
+			window._boxnow_init_timer = null;
+
+			window.initBoxNowWidget = function(forceReload) {
+				// DEBOUNCE: Clear any pending initialization
+				if (window._boxnow_init_timer) {
+					clearTimeout(window._boxnow_init_timer);
+				}
+
+				// DEBOUNCE: Schedule initialization after 300ms
+				window._boxnow_init_timer = setTimeout(function() {
+					// Step 1: Cleanup old event listeners
+					jQuery('#js-delivery .continue').off('click.boxnow');
+
+					// Step 2: Add validation listener
+					jQuery('#js-delivery .continue').on('click.boxnow', function() {
+						if ($('.boxnow-zip').val() === '' && $('#boxnow-map-container').is(":visible")) {
+							$('.boxnow-selected-locker').html('<div class="select-boxnow-locker error">{$select_boxnow_locker_error}</div>');
+							const offset = 100;
+							const target = $('.boxnow-selected-locker');
+							$('html, body').stop().animate({
+								'scrollTop': $(target).offset().top - offset
+							}, 700, 'swing');
+							return false;
+						}
+					});
+
+					if (typeof window._bn_map_widget_config === 'undefined') {
+						return;
+					}
+
+					// Step 3: Clean up old widgets/iframes if force reload is requested
+					if (forceReload === true) {
+						// Remove old iframes
+						$('#boxnowmap-popup iframe, #boxnowmap-inline iframe').remove();
+
+						// Clear the containers completely
+						$('#boxnowmap-popup, #boxnowmap-inline').empty();
+
+						// Remove the external widget script and force reload
+						const oldScript = document.querySelector('script[src*="widget-cdn.boxnow.gr"]');
+						if (oldScript) {
+							oldScript.remove();
+						}
+
+						// Reset any BoxNow global objects
+						if (typeof window.BoxNowWidget !== 'undefined') {
+							delete window.BoxNowWidget;
+						}
+						if (typeof window.BoxNowMapWidget !== 'undefined') {
+							delete window.BoxNowMapWidget;
+						}
+					}
+
+					// Step 4: Load widget script (always reload if forced)
+					const scriptExists = document.querySelector('script[src*="widget-cdn.boxnow.gr"]');
+
+					if (!scriptExists || forceReload === true) {
+						(function(d) {
+							const e = d.createElement("script");
+							e.src = "https://widget-cdn.boxnow.gr/map-widget/client/v5.js?v=" + Date.now();
+							e.async = true;
+							e.defer = false;
+							d.getElementsByTagName("head")[0].appendChild(e);
+
+							// Wait for script to load and initialize
+							e.onload = function() {
+								setTimeout(function() {
+									// Try to trigger widget initialization
+									if (window.BoxNowMapWidget && typeof window.BoxNowMapWidget.init === 'function') {
+										window.BoxNowMapWidget.init(window._bn_map_widget_config);
+									}
+								}, 200);
+							};
+						})(document);
+					}
+
+					window._boxnow_init_timer = null;
+				}, 300);
+			};
+		}
+
+		// Execute on standard PrestaShop checkout (register only once)
+		if (typeof window._boxnow_load_registered === 'undefined') {
+			window._boxnow_load_registered = true;
+			window.addEventListener("load", function() {
+				window.initBoxNowWidget(false);
+			});
+		}
+
+		// Execute on One Page Checkout modules (register only once)
+		if (typeof prestashop !== 'undefined' && typeof prestashop.on === 'function') {
+			if (typeof window._boxnow_opc_registered === 'undefined') {
+				window._boxnow_opc_registered = true;
+
+				prestashop.on('opc-shipping-getCarrierList-complete', function(data) {
+					if ($('#boxnow-map-container').length > 0) {
+						window.initBoxNowWidget(true);
+					}
+				});
+			}
+		}
+
+		// Only call initialization inline on the FIRST render
+		// Subsequent renders are handled by OPC events
+		if ($('#boxnow-map-container').length > 0) {
+			if (typeof window._boxnow_ever_initialized === 'undefined') {
+				window._boxnow_ever_initialized = true;
+				window.initBoxNowWidget(false);
+			}
+		}
 	</script>
 
 	{literal}
